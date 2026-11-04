@@ -61,9 +61,8 @@ export class TestExecutor {
     }
 
     async executeSteps(steps: TestStep[], testResult: TestResult) {
-        for (const step of steps) {
-            const index = steps.indexOf(step);
-            await this.executeStep(step, index, testResult);
+        for (let index = 0; index < steps.length; index++) {
+            await this.executeStep(steps[index], index, testResult);
         }
     }
 
@@ -88,10 +87,10 @@ export class TestExecutor {
         }
     }
 
-    async executeAction(step: TestStep, index: number, testResult: TestResult) {
-        const parameters = step.parameters?.map(param => this.replaceVariables(param)) || [];
-        const action = this.replaceVariables(step.action || '');
-        this.stepsTiming[index] = { start: Date.now(), end: 0 };
+     async executeAction(step: TestStep, index: number, testResult: TestResult) {
+         const parameters = step.parameters?.map(param => this.replaceVariables(param)) || [];
+         const action = this.replaceVariables(step.action || '');
+         this.stepsTiming[index] = { start: Date.now(), end: 0 };
 
         const stepResult: StepResult = {
             stepNumber: index + 1,
@@ -124,24 +123,14 @@ export class TestExecutor {
         }
     }
 
-
-    /**
-     * Форматирует параметры для логирования.
-     * Убирает пустые строки и строки, содержащие только '{}'.
-     * Если есть параметры, возвращает строку в формате [param1, param2].
-     * Иначе возвращает пустую строку.
-     * @param parameters Массив параметров
-     * @returns Отформатированная строка параметров
-     */
     private formatParameters(parameters: string[]): string {
         const filteredParameters = parameters.filter(param => param && param !== '{}');
         return filteredParameters.length > 0 ? ` [${ filteredParameters.join(', ') }]` : '';
     }
 
     async executeIf(step: TestStep, testResult: TestResult) {
-        const condition = this.replaceVariables(step.action || '');
-        const conditionResult = await this.evaluateCondition(condition);
-
+         const condition = this.replaceVariables(step.action || '');
+         const conditionResult = await this.evaluateCondition(condition);
         if (conditionResult) {
             if (step.steps) {
                 await this.executeSteps(step.steps, testResult);
@@ -154,21 +143,38 @@ export class TestExecutor {
         }
     }
 
+
     async executeLoop(step: TestStep, testResult: TestResult) {
         const loopExpression = this.replaceVariables(step.action || '');
         const items = await this.getLoopItems(loopExpression);
 
         for (const item of items) {
-            const [ varName ] = loopExpression.split(' в ');
-            const variableName = varName.trim();
-            this.variables[variableName] = item;
+            let varName = '';
+            if (loopExpression.includes(' в ')) {
+                varName = loopExpression.split(' в ')[0].trim();
+            } else if (loopExpression.includes(' in ')) {
+                varName = loopExpression.split(' in ')[0].trim();
+            } else {
+                throw new Error(`Не удалось извлечь имя переменной из цикла: ${loopExpression}`);
+            }
+            this.variables[varName.trim()] = item;
+            if (typeof item === 'string' && item.includes(';')) {
+                const parts = item.split(';');
+                this.variables['значение'] = parts[0]?.trim();
+                this.variables['ожидаемый результат'] = parts[1]?.trim();
+                this.variables['возможный положительный результат'] = parts[2]?.trim();
+            }
 
             if (step.steps) {
-                const updatedSteps = step.steps.map(innerStep => ({
-                    ...innerStep,
-                    parameters: [ item ]
-                }));
-
+                const updatedSteps = step.steps.map(innerStep => {
+                    const newParams = (innerStep.parameters || []).map(p => this.replaceVariables(p));
+                    const newAction = innerStep.action ? this.replaceVariables(innerStep.action) : undefined;
+                    return {
+                        ...innerStep,
+                        action: newAction,
+                        parameters: newParams
+                    };
+                });
                 await this.executeSteps(updatedSteps, testResult);
             }
         }
@@ -191,7 +197,15 @@ export class TestExecutor {
             const actualTitle = await this.variables['pageTitle'];
             return (actualTitle || '').includes(expectedText);
         }
-        return true;
+        const match = condition.match(/\{(.*?)\}\s*equals\s*"([^"]+)"/);
+        if (match) {
+            const varName = match[1].trim();
+            const expectedValue = match[2];
+            const actualValue = this.variables[varName];
+            return actualValue === expectedValue;
+        }
+
+        return false;
     }
 
     async getLoopItems(loopExpression: string): Promise<any[]> {
@@ -207,9 +221,6 @@ export class TestExecutor {
         throw new Error(`Неверное выражение цикла: ${ loopExpression }`);
     }
 
-    /**
-     * Сохраняет логи тестов в файл.
-     */
     private saveLogs() {
         const timestamp = getFormattedTimestamp();
         const logFilename = `logs-${ timestamp }.json`;
@@ -223,14 +234,9 @@ export class TestExecutor {
         fs.writeFileSync(logPath, JSON.stringify(this.testResults, null, 2), 'utf-8');
         console.log(`📝 Логи тестов сохранены по пути: ${ logPath }`);
     }
-
-    /**
-     * Отчет о времени выполнения теста.
-     */
     reportTiming() {
         const scenarioDuration = this.scenarioEndTime - this.scenarioStartTime;
         console.log(`⏱ Время выполнения сценария: ${ scenarioDuration } мс`);
-        // noinspection NonAsciiCharacters
         console.table(Object.entries(this.stepsTiming).map(([ name, times ]) => ({
             Шаг: name,
             'Время начала (мс)': times.start,
