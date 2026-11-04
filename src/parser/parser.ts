@@ -89,19 +89,19 @@ export class EnhancedGherkinParser {
     }
 
     extractActionAndParameters(line: string): { action: string; parameters: string[] } {
-        const regex = /"([^"]+)"|(\d+)/g;
-        const parameters = [];
+        const regex = /"([^"]+)"|(\d+)|(\{[^}]+\})/g;
+        const parameters: string[] = [];
         let match;
         while ((match = regex.exec(line)) !== null) {
             if (match[1] !== undefined) {
-               parameters.push(match[1]);
+                parameters.push(match[1]);
             } else if (match[2] !== undefined) {
                 parameters.push(match[2]);
+            } else if (match[3] !== undefined) {
+                parameters.push(match[3]);
             }
         }
-
         const action = line.replace(regex, '{}').trim();
-
         return { action, parameters };
     }
 }
